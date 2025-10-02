@@ -26,6 +26,8 @@ const LionTechDashboard = () => {
   const [syncing, setSyncing] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(null);
   const [cancelPassword, setCancelPassword] = useState('');
+  const [confirmRevert, setConfirmRevert] = useState(null);
+  const [revertPassword, setRevertPassword] = useState('');
   const [selectedMonthToGenerate, setSelectedMonthToGenerate] = useState(new Date().toISOString().slice(0, 7));
   
   const [tvPoints, setTvPoints] = useState([]);
@@ -464,6 +466,40 @@ const LionTechDashboard = () => {
     }
   };
 
+  const confirmRevertPayment = (paymentId) => {
+    setConfirmRevert(paymentId);
+    setRevertPassword('');
+  };
+
+  const executeRevertPayment = async () => {
+    if (revertPassword !== credentials.password) { alert('Senha incorreta!'); return; }
+    if (confirmRevert) {
+      try {
+        setSyncing(true);
+        const payment = payments.find(p => p.id === confirmRevert);
+        if (!payment) return;
+        
+        const currentDate = new Date();
+        const dueDate = new Date(payment.dueDate);
+        const newStatus = dueDate < currentDate ? 'Atrasado' : 'Pendente';
+        
+        await updateDoc(doc(db, 'payments', confirmRevert), {
+          status: newStatus,
+          paidDate: null
+        });
+        await loadAllData();
+        setConfirmRevert(null);
+        setRevertPassword('');
+        setSyncing(false);
+        alert(`Pagamento revertido para ${newStatus}!`);
+      } catch (error) {
+        console.error('Erro:', error);
+        alert('Erro ao reverter');
+        setSyncing(false);
+      }
+    }
+  };
+
   const togglePointSelection = (pointId) => { setClientForm(prev => ({ ...prev, selectedPoints: prev.selectedPoints.includes(pointId) ? prev.selectedPoints.filter(id => id !== pointId) : [...prev.selectedPoints, pointId] })); };
   
   const markAsPaid = async (paymentId) => {
@@ -492,12 +528,16 @@ const LionTechDashboard = () => {
   
   const monthsToGenerate = useMemo(() => {
     const months = [];
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - i);
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    
+    // Gerar todos os meses de janeiro do ano atual até o mês atual
+    for (let month = 0; month <= currentDate.getMonth(); month++) {
+      const date = new Date(currentYear, month, 1);
       months.push(date.toISOString().slice(0, 7));
     }
-    return months;
+    
+    return months.reverse(); // Mais recente primeiro
   }, []);
   
   const revenueByMonth = useMemo(() => { 
@@ -614,6 +654,23 @@ const LionTechDashboard = () => {
                   <button type="submit" className="w-full bg-emerald-600 text-white px-4 py-2 rounded-lg font-semibold">Alterar Senha</button>
                 </form>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmRevert && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-blue-100 p-3 rounded-lg"><AlertTriangle className="text-blue-600" size={24} /></div>
+              <h3 className="text-lg font-bold">Reverter Pagamento</h3>
+            </div>
+            <p className="text-slate-600 mb-4">Digite sua senha para reverter este pagamento de "Pago" para "Pendente" ou "Atrasado":</p>
+            <input type="password" value={revertPassword} onChange={(e) => setRevertPassword(e.target.value)} placeholder="Senha" className="w-full border rounded-lg px-4 py-2 mb-4" />
+            <div className="flex gap-2">
+              <button onClick={executeRevertPayment} className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold">Reverter</button>
+              <button onClick={() => { setConfirmRevert(null); setRevertPassword(''); }} className="flex-1 bg-slate-300 px-4 py-2 rounded-lg font-semibold">Cancelar</button>
             </div>
           </div>
         </div>
@@ -739,7 +796,7 @@ const LionTechDashboard = () => {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                   <h3 className="text-xl font-bold">Gerar Cobranças</h3>
-                  <p className="text-emerald-100 text-sm">Selecione o mês e gere as cobranças</p>
+                  <p className="text-emerald-100 text-sm">Selecione o mês e gere cobranças (inclusive retroativas)</p>
                 </div>
                 <div className="flex gap-2">
                   <select value={selectedMonthToGenerate} onChange={(e) => setSelectedMonthToGenerate(e.target.value)} className="bg-white text-slate-900 px-4 py-2 rounded-lg font-semibold">
@@ -970,14 +1027,21 @@ const LionTechDashboard = () => {
                           <td className="px-4 py-3">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
                           <td className="px-4 py-3"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${payment.status === 'Pago' ? 'bg-emerald-100 text-emerald-700' : payment.status === 'Atrasado' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{payment.status}</span></td>
                           <td className="px-4 py-3">
-                            {payment.status !== 'Pago' && (
+                            {payment.status !== 'Pago' && payment.status !== 'Cancelado' && (
                               <div className="flex gap-2">
                                 <button onClick={() => sendWhatsAppCharge(client.id, payment.id)} className="text-emerald-600 hover:bg-emerald-50 p-2 rounded" title="Enviar WhatsApp"><Send size={16} /></button>
                                 <button onClick={() => markAsPaid(payment.id)} className="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Marcar como pago"><Check size={16} /></button>
                                 <button onClick={() => confirmCancelPayment(payment.id)} className="text-orange-600 hover:bg-orange-50 p-2 rounded" title="Cancelar pagamento"><X size={16} /></button>
                               </div>
                             )}
-                            {payment.status === 'Pago' && <span className="text-xs text-emerald-600 font-semibold">Pago</span>}
+                            {payment.status === 'Pago' && (
+                              <div className="flex gap-2 items-center">
+                                <span className="text-xs text-emerald-600 font-semibold">✓ Pago em {payment.paidDate ? new Date(payment.paidDate).toLocaleDateString('pt-BR') : 'N/A'}</span>
+                                <button onClick={() => confirmRevertPayment(payment.id)} className="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Reverter para Pendente">
+                                  <Repeat size={16} />
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
