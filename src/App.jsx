@@ -271,45 +271,6 @@ const LionTechDashboard = () => {
     }
   };
 
-  const fixDueDates = async () => {
-    if (!window.confirm('Deseja recalcular TODAS as datas de vencimento? Esta ação corrigirá cobranças com datas erradas.')) return;
-    
-    try {
-      setSyncing(true);
-      let fixedCount = 0;
-      
-      for (const payment of payments) {
-        if (payment.status === 'Cancelado') continue;
-        
-        const client = clients.find(c => c.id === payment.clientId);
-        if (!client) continue;
-        
-        const [year, month] = payment.month.split('-');
-        const dueDay = String(client.dueDay).padStart(2, '0');
-        const correctDueDate = `${year}-${month}-${dueDay}`;
-        
-        if (payment.dueDate !== correctDueDate) {
-          const currentDate = new Date();
-          const newStatus = payment.status === 'Pago' ? 'Pago' : (new Date(correctDueDate) < currentDate ? 'Atrasado' : 'Pendente');
-          
-          await updateDoc(doc(db, 'payments', payment.id), {
-            dueDate: correctDueDate,
-            status: newStatus
-          });
-          fixedCount++;
-        }
-      }
-      
-      await loadAllData();
-      setSyncing(false);
-      alert(`${fixedCount} data(s) de vencimento corrigida(s)!`);
-    } catch (error) {
-      console.error('Erro:', error);
-      alert('Erro ao corrigir datas');
-      setSyncing(false);
-    }
-  };
-
   const sendWhatsAppCharge = (clientId, paymentId) => {
     const client = clients.find(c => c.id === clientId);
     const payment = payments.find(p => p.id === paymentId);
@@ -335,6 +296,53 @@ const LionTechDashboard = () => {
     
     const phoneNumber = client.phone.replace(/\D/g, '');
     window.open(`https://wa.me/55${phoneNumber}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  const fixAllDueDates = async () => {
+    if (!window.confirm('⚠️ Esta ação vai CORRIGIR TODAS as datas de vencimento!\n\nAs cobranças ficarão no mesmo mês em que foram geradas.\n\nExemplo: Cobrança de SETEMBRO terá vencimento em SETEMBRO.\n\nDeseja continuar?')) return;
+    
+    try {
+      setSyncing(true);
+      let fixedCount = 0;
+      
+      for (const payment of payments) {
+        if (payment.status === 'Cancelado' || !payment.month) continue;
+        
+        const client = clients.find(c => c.id === payment.clientId);
+        if (!client) continue;
+        
+        // A data deve estar no mesmo mês que foi gerada
+        const [year, month] = payment.month.split('-');
+        const dueDay = String(client.dueDay).padStart(2, '0');
+        const correctDueDate = `${year}-${month}-${dueDay}`;
+        
+        // Se a data estiver diferente, corrige
+        if (payment.dueDate !== correctDueDate) {
+          const currentDate = new Date();
+          const newDueDate = new Date(correctDueDate);
+          
+          // Mantém "Pago" se já foi pago, senão recalcula status
+          let newStatus = payment.status;
+          if (payment.status !== 'Pago') {
+            newStatus = newDueDate < currentDate ? 'Atrasado' : 'Pendente';
+          }
+          
+          await updateDoc(doc(db, 'payments', payment.id), {
+            dueDate: correctDueDate,
+            status: newStatus
+          });
+          fixedCount++;
+        }
+      }
+      
+      await loadAllData();
+      setSyncing(false);
+      alert(`✅ ${fixedCount} data(s) de vencimento corrigida(s)!\n\nAgora as cobranças estão no mês correto.`);
+    } catch (error) {
+      console.error('Erro:', error);
+      alert('❌ Erro ao corrigir datas');
+      setSyncing(false);
+    }
   };
 
   const handleAddPoint = async () => {
@@ -643,7 +651,7 @@ const LionTechDashboard = () => {
     const months = ['2025-06', '2025-07', '2025-08', '2025-09', '2025-10']; 
     return months.map(month => ({ 
       month: new Date(month + '-01').toLocaleDateString('pt-BR', { month: 'short' }), 
-      value: payments.filter(p => p.month === month && p.status === 'Pago').reduce((sum, p) => sum + p.value, 0) 
+      value: payments.filter(p => p.dueDate && p.dueDate.slice(0, 7) === month && p.status === 'Pago').reduce((sum, p) => sum + p.value, 0) 
     })); 
   }, [payments]);
   
@@ -1135,7 +1143,11 @@ const LionTechDashboard = () => {
             <div className="flex justify-between items-center flex-wrap gap-2">
               <h2 className="text-2xl font-bold">Cobranças</h2>
               <div className="flex gap-2">
-                <button onClick={fixDueDates} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700">
+                <button 
+                  onClick={fixAllDueDates} 
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-semibold"
+                  title="Corrige todas as datas de vencimento para ficarem no mês correto"
+                >
                   <Calendar size={18} />
                   Corrigir Vencimentos
                 </button>
