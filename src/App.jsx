@@ -1,4 +1,4 @@
-// src/App.jsx - VERSÃO COM TODAS AS MELHORIAS
+// src/App.jsx - VERSÃO FINAL CORRIGIDA
 import React, { useState, useMemo, useEffect } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Calendar, DollarSign, Users, TrendingUp, AlertTriangle, Tv, Plus, Edit2, Trash2, Check, X, Send, MapPin, FileText, Phone, Filter, Repeat, Lock, Download, Cloud, Settings, LogOut, Eye, EyeOff, Upload, Image as ImageIcon } from 'lucide-react';
@@ -193,7 +193,6 @@ const LionTechDashboard = () => {
     const activePermutaClients = clients.filter(c => c.status === 'Ativo' && c.isPermuta).length;
     const activePoints = tvPoints.filter(p => p.status === 'Ativo').length;
     
-    // Filtrar pagamentos baseado no filtro do dashboard usando data de vencimento
     let filteredPayments = payments.filter(p => p.status !== 'Cancelado' && p.dueDate);
     if (dashboardMonthFilter !== 'TODOS') {
       filteredPayments = filteredPayments.filter(p => p.dueDate.slice(0, 7) === dashboardMonthFilter);
@@ -277,29 +276,33 @@ const LionTechDashboard = () => {
     if (!client || !payment) return;
     
     const pointsNames = client.selectedPoints.map(pid => tvPoints.find(p => p.id === pid)?.name).filter(Boolean).join(', ');
-    const dueDate = new Date(payment.dueDate).toLocaleDateString('pt-BR');
+    const dueDate = new Date(payment.dueDate + 'T00:00:00');
+    const dueDateFormatted = dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+    const monthName = dueDate.toLocaleDateString('pt-BR', { month: 'long' });
     
-    let message = `Olá ${client.contact}!\n\n`;
+    let message = `Olá, ${client.contact}! Tudo bem?\n\n`;
+    message += `Passando aqui para te lembrar que está chegando o vencimento da sua mensalidade referente aos nossos serviços de mídia.\n\n`;
     message += `📺 *Pontos de TV:* ${pointsNames}\n`;
     message += `💰 *Valor:* R$ ${payment.value.toFixed(2)}\n`;
-    message += `📅 *Vencimento:* ${dueDate}\n\n`;
+    message += `📅 *Vencimento:* ${dueDateFormatted}\n\n`;
     
     if (client.paymentMethod === 'PIX') {
-      message += `💳 *Forma de Pagamento:* PIX\n`;
-      message += `📱 *Chave PIX:* liontech@gmail.com\n\n`;
+      message += `Para sua comodidade, você pode pagar via *PIX* usando a chave:\n`;
+      message += `🔑 *liontech@gmail.com*\n\n`;
+      message += `Após efetuar o pagamento, é só nos enviar o comprovante por aqui mesmo!\n\n`;
     } else {
-      message += `💳 *Forma de Pagamento:* Boleto\n`;
-      message += `📄 O boleto segue em anexo.\n\n`;
+      message += `📄 O boleto referente a ${monthName} está disponível e pode ser consultado conosco.\n\n`;
     }
     
-    message += `Obrigado pela confiança!`;
+    message += `Qualquer dúvida, estamos à disposição!\n\n`;
+    message += `Agradecemos pela confiança!`;
     
     const phoneNumber = client.phone.replace(/\D/g, '');
     window.open(`https://wa.me/55${phoneNumber}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const fixAllDueDates = async () => {
-    if (!window.confirm('⚠️ Esta ação vai CORRIGIR TODAS as datas de vencimento!\n\nAs cobranças ficarão no mesmo mês em que foram geradas.\n\nExemplo: Cobrança de SETEMBRO terá vencimento em SETEMBRO.\n\nDeseja continuar?')) return;
+    if (!window.confirm('Esta ação vai corrigir TODAS as datas de vencimento!\n\nCada cobrança terá a data ajustada para o mês correto.\n\nDeseja continuar?')) return;
     
     try {
       setSyncing(true);
@@ -311,17 +314,14 @@ const LionTechDashboard = () => {
         const client = clients.find(c => c.id === payment.clientId);
         if (!client) continue;
         
-        // A data deve estar no mesmo mês que foi gerada
         const [year, month] = payment.month.split('-');
         const dueDay = String(client.dueDay).padStart(2, '0');
         const correctDueDate = `${year}-${month}-${dueDay}`;
         
-        // Se a data estiver diferente, corrige
         if (payment.dueDate !== correctDueDate) {
           const currentDate = new Date();
-          const newDueDate = new Date(correctDueDate);
+          const newDueDate = new Date(correctDueDate + 'T00:00:00');
           
-          // Mantém "Pago" se já foi pago, senão recalcula status
           let newStatus = payment.status;
           if (payment.status !== 'Pago') {
             newStatus = newDueDate < currentDate ? 'Atrasado' : 'Pendente';
@@ -337,10 +337,10 @@ const LionTechDashboard = () => {
       
       await loadAllData();
       setSyncing(false);
-      alert(`✅ ${fixedCount} data(s) de vencimento corrigida(s)!\n\nAgora as cobranças estão no mês correto.`);
+      alert(fixedCount > 0 ? `${fixedCount} data(s) corrigida(s)!\n\nAgora as cobranças estão no mês correto.` : 'Nenhuma correção necessária!\n\nTodas as datas já estão corretas.');
     } catch (error) {
       console.error('Erro:', error);
-      alert('❌ Erro ao corrigir datas');
+      alert('Erro ao corrigir datas: ' + error.message);
       setSyncing(false);
     }
   };
@@ -603,30 +603,24 @@ const LionTechDashboard = () => {
 
   const filteredClients = useMemo(() => clients.filter(c => c.status === clientFilter), [clients, clientFilter]);
   const filteredPayments = useMemo(() => {
-    // Filtrar por mês de vencimento, não por mês de geração
     const filtered = payments.filter(p => {
       if (p.status === 'Cancelado') return false;
       if (!p.dueDate) return false;
-      
-      // Extrair ano-mês da data de vencimento
-      const dueDateMonth = p.dueDate.slice(0, 7); // Pega "2025-09" de "2025-09-05"
+      const dueDateMonth = p.dueDate.slice(0, 7);
       return dueDateMonth === chargeMonthFilter;
     });
-    
     return filtered.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
   }, [payments, chargeMonthFilter]);
   
   const availableMonths = useMemo(() => {
-    // Obter meses únicos baseado nas datas de vencimento
     const months = [...new Set(payments
       .filter(p => p.dueDate && p.status !== 'Cancelado')
-      .map(p => p.dueDate.slice(0, 7)) // Extrai "2025-09" de "2025-09-05"
+      .map(p => p.dueDate.slice(0, 7))
     )];
     return months.length > 0 ? months.sort().reverse() : [new Date().toISOString().slice(0, 7)];
   }, [payments]);
   
   const dashboardMonthsAvailable = useMemo(() => {
-    // Obter meses únicos baseado nas datas de vencimento
     const months = [...new Set(payments
       .filter(p => p.dueDate && p.status !== 'Cancelado')
       .map(p => p.dueDate.slice(0, 7))
@@ -708,19 +702,12 @@ const LionTechDashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className={`fixed top-4 right-4 z-50 ${syncing ? 'bg-blue-500' : 'bg-emerald-500'} text-white px-4 py-2 rounded-full shadow-lg text-sm font-semibold flex items-center gap-2`}>
-        {syncing ? (
-          <>
-            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-            Sincronizando...
-          </>
-        ) : (
-          <>
-            <Cloud size={16} />
-            Salvo na Nuvem
-          </>
-        )}
-      </div>
+      {syncing && (
+        <div className="fixed top-4 left-4 z-50 bg-blue-500 text-white px-4 py-2 rounded-full shadow-lg text-sm font-semibold flex items-center gap-2">
+          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+          Sincronizando...
+        </div>
+      )}
 
       {showSettings && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -917,31 +904,31 @@ const LionTechDashboard = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-6 gap-4">
-              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-emerald-500">
-                <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Receita Total' : 'Receita Mês'}</p>
-                <p className="text-3xl font-bold text-slate-900">R$ {metrics.monthlyRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+              <div className="bg-white rounded-xl shadow-md p-3 border-l-4 border-emerald-500">
+                <p className="text-slate-600 text-xs mb-1">{dashboardMonthFilter === 'TODOS' ? 'Receita Total' : 'Receita Mês'}</p>
+                <p className="text-lg font-bold text-slate-900">R$ {metrics.monthlyRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500">
-                <p className="text-slate-600 text-sm">Permuta</p>
-                <p className="text-3xl font-bold text-slate-900">R$ {metrics.permutaRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+              <div className="bg-white rounded-xl shadow-md p-3 border-l-4 border-purple-500">
+                <p className="text-slate-600 text-xs mb-1">Permuta</p>
+                <p className="text-lg font-bold text-slate-900">R$ {metrics.permutaRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-500">
-                <p className="text-slate-600 text-sm">Descontos</p>
-                <p className="text-3xl font-bold text-slate-900">R$ {metrics.totalDiscountsGiven.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+              <div className="bg-white rounded-xl shadow-md p-3 border-l-4 border-blue-500">
+                <p className="text-slate-600 text-xs mb-1">Descontos</p>
+                <p className="text-lg font-bold text-slate-900">R$ {metrics.totalDiscountsGiven.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-amber-500">
-                <p className="text-slate-600 text-sm">Clientes Ativos</p>
-                <p className="text-3xl font-bold text-slate-900">{metrics.activeClients}</p>
+              <div className="bg-white rounded-xl shadow-md p-3 border-l-4 border-amber-500">
+                <p className="text-slate-600 text-xs mb-1">Clientes Ativos</p>
+                <p className="text-lg font-bold text-slate-900">{metrics.activeClients}</p>
                 <p className="text-xs text-slate-500 mt-1">{metrics.activePermutaClients} permuta(s)</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-slate-500">
-                <p className="text-slate-600 text-sm">Clientes Inativos</p>
-                <p className="text-3xl font-bold text-slate-900">{metrics.inactiveClients}</p>
+              <div className="bg-white rounded-xl shadow-md p-3 border-l-4 border-slate-500">
+                <p className="text-slate-600 text-xs mb-1">Clientes Inativos</p>
+                <p className="text-lg font-bold text-slate-900">{metrics.inactiveClients}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-red-500">
-                <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Valor Atrasado Total' : 'Valor Atrasado'}</p>
-                <p className="text-3xl font-bold text-slate-900">R$ {metrics.overdueAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+              <div className="bg-white rounded-xl shadow-md p-3 border-l-4 border-red-500">
+                <p className="text-slate-600 text-xs mb-1">{dashboardMonthFilter === 'TODOS' ? 'Valor Atrasado Total' : 'Valor Atrasado'}</p>
+                <p className="text-lg font-bold text-slate-900">R$ {metrics.overdueAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                 <p className="text-xs text-slate-500 mt-1">{metrics.overdue} pagamento(s)</p>
               </div>
             </div>
@@ -1147,7 +1134,6 @@ const LionTechDashboard = () => {
                 <button 
                   onClick={fixAllDueDates} 
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-semibold"
-                  title="Corrige todas as datas de vencimento para ficarem no mês correto"
                 >
                   <Calendar size={18} />
                   Corrigir Vencimentos
@@ -1194,7 +1180,7 @@ const LionTechDashboard = () => {
                         <tr key={payment.id} className={`border-t ${rowColorClass}`}>
                           <td className="px-4 py-3"><p className="font-medium">{client.name}</p></td>
                           <td className="px-4 py-3 font-semibold">R$ {payment.value.toFixed(2)}</td>
-                          <td className="px-4 py-3">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
+                          <td className="px-4 py-3">{new Date(payment.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
                           <td className="px-4 py-3"><span className={`px-3 py-1 rounded-full text-xs font-semibold ${payment.status === 'Pago' ? 'bg-emerald-100 text-emerald-700' : payment.status === 'Atrasado' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{payment.status}</span></td>
                           <td className="px-4 py-3">
                             {payment.status !== 'Pago' && payment.status !== 'Cancelado' && (
@@ -1206,7 +1192,7 @@ const LionTechDashboard = () => {
                             )}
                             {payment.status === 'Pago' && (
                               <div className="flex gap-2 items-center">
-                                <span className="text-xs text-emerald-600 font-semibold">✓ Pago em {payment.paidDate ? new Date(payment.paidDate).toLocaleDateString('pt-BR') : 'N/A'}</span>
+                                <span className="text-xs text-emerald-600 font-semibold">✓ Pago em {payment.paidDate ? new Date(payment.paidDate + 'T00:00:00').toLocaleDateString('pt-BR') : 'N/A'}</span>
                                 <button onClick={() => confirmRevertPayment(payment.id)} className="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Reverter para Pendente">
                                   <Repeat size={16} />
                                 </button>
