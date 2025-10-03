@@ -193,27 +193,19 @@ const LionTechDashboard = () => {
     const activePermutaClients = clients.filter(c => c.status === 'Ativo' && c.isPermuta).length;
     const activePoints = tvPoints.filter(p => p.status === 'Ativo').length;
     
-    // Filtrar pagamentos baseado no filtro do dashboard (excluir cancelados)
     let filteredPayments = payments.filter(p => p.status !== 'Cancelado');
     if (dashboardMonthFilter !== 'TODOS') {
       filteredPayments = filteredPayments.filter(p => p.month === dashboardMonthFilter);
     }
     
-    // Receita já paga (excluindo cancelados)
     const monthlyRevenue = filteredPayments.filter(p => p.status === 'Pago').reduce((sum, p) => sum + p.value, 0);
-    
-    // Receita esperada (pendente + atrasado + pago, excluindo cancelados)
     const expectedRevenue = filteredPayments.reduce((sum, p) => sum + p.value, 0);
-    
-    // Calcular total de descontos aplicados nos pagamentos filtrados
     const totalDiscountsGiven = filteredPayments.reduce((sum, p) => sum + (p.discountApplied || 0), 0);
     
-    // Calcular permuta: clientes ativos de permuta
     const permutaRevenue = clients.filter(c => c.status === 'Ativo' && c.isPermuta).reduce((sum, c) => {
       return sum + calculateClientMonthly(c.selectedPoints, c.discountValue, c.permutaValue);
     }, 0);
     
-    // Multiplicar permuta pelo número de meses se "TODOS" estiver selecionado
     let adjustedPermutaRevenue = permutaRevenue;
     if (dashboardMonthFilter === 'TODOS') {
       const uniqueMonths = [...new Set(payments.map(p => p.month))].length;
@@ -243,6 +235,7 @@ const LionTechDashboard = () => {
     try {
       setSyncing(true);
       const targetMonth = monthToGenerate || new Date().toISOString().slice(0, 7);
+      const [year, month] = targetMonth.split('-');
       const currentDate = new Date();
       let generatedCount = 0;
       
@@ -251,7 +244,9 @@ const LionTechDashboard = () => {
         const existingPayment = payments.find(p => p.clientId === client.id && p.month === targetMonth);
         if (!existingPayment) {
           const monthlyValue = calculateClientMonthly(client.selectedPoints, client.discountValue, client.permutaValue);
-          const dueDate = `${targetMonth}-${String(client.dueDay).padStart(2, '0')}`;
+          const dueDay = String(client.dueDay).padStart(2, '0');
+          const dueDate = `${year}-${month}-${dueDay}`;
+          
           await addDoc(collection(db, 'payments'), {
             clientId: client.id,
             month: targetMonth,
@@ -559,7 +554,11 @@ const LionTechDashboard = () => {
   };
 
   const filteredClients = useMemo(() => clients.filter(c => c.status === clientFilter), [clients, clientFilter]);
-  const filteredPayments = useMemo(() => payments.filter(p => p.month === chargeMonthFilter && p.status !== 'Cancelado'), [payments, chargeMonthFilter]);
+  const filteredPayments = useMemo(() => {
+    const filtered = payments.filter(p => p.month === chargeMonthFilter && p.status !== 'Cancelado');
+    return filtered.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+  }, [payments, chargeMonthFilter]);
+  
   const availableMonths = useMemo(() => {
     const months = [...new Set(payments.map(p => p.month))];
     return months.length > 0 ? months.sort().reverse() : [new Date().toISOString().slice(0, 7)];
@@ -575,13 +574,12 @@ const LionTechDashboard = () => {
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
     
-    // Gerar todos os meses de janeiro do ano atual até o mês atual
     for (let month = 0; month <= currentDate.getMonth(); month++) {
       const date = new Date(currentYear, month, 1);
       months.push(date.toISOString().slice(0, 7));
     }
     
-    return months.reverse(); // Mais recente primeiro
+    return months.reverse();
   }, []);
   
   const revenueByMonth = useMemo(() => { 
@@ -1110,8 +1108,16 @@ const LionTechDashboard = () => {
                     {filteredPayments.map(payment => {
                       const client = clients.find(c => c.id === payment.clientId);
                       if (!client) return null;
+                      
+                      let rowColorClass = 'bg-white';
+                      if (payment.status === 'Pago') {
+                        rowColorClass = 'bg-emerald-50';
+                      } else if (payment.status === 'Atrasado') {
+                        rowColorClass = 'bg-red-50';
+                      }
+                      
                       return (
-                        <tr key={payment.id} className="border-t">
+                        <tr key={payment.id} className={`border-t ${rowColorClass}`}>
                           <td className="px-4 py-3"><p className="font-medium">{client.name}</p></td>
                           <td className="px-4 py-3 font-semibold">R$ {payment.value.toFixed(2)}</td>
                           <td className="px-4 py-3">{new Date(payment.dueDate).toLocaleDateString('pt-BR')}</td>
