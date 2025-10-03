@@ -193,9 +193,10 @@ const LionTechDashboard = () => {
     const activePermutaClients = clients.filter(c => c.status === 'Ativo' && c.isPermuta).length;
     const activePoints = tvPoints.filter(p => p.status === 'Ativo').length;
     
-    let filteredPayments = payments.filter(p => p.status !== 'Cancelado');
+    // Filtrar pagamentos baseado no filtro do dashboard usando data de vencimento
+    let filteredPayments = payments.filter(p => p.status !== 'Cancelado' && p.dueDate);
     if (dashboardMonthFilter !== 'TODOS') {
-      filteredPayments = filteredPayments.filter(p => p.month === dashboardMonthFilter);
+      filteredPayments = filteredPayments.filter(p => p.dueDate.slice(0, 7) === dashboardMonthFilter);
     }
     
     const monthlyRevenue = filteredPayments.filter(p => p.status === 'Pago').reduce((sum, p) => sum + p.value, 0);
@@ -208,7 +209,7 @@ const LionTechDashboard = () => {
     
     let adjustedPermutaRevenue = permutaRevenue;
     if (dashboardMonthFilter === 'TODOS') {
-      const uniqueMonths = [...new Set(payments.map(p => p.month))].length;
+      const uniqueMonths = [...new Set(payments.filter(p => p.dueDate).map(p => p.dueDate.slice(0, 7)))].length;
       adjustedPermutaRevenue = permutaRevenue * (uniqueMonths || 1);
     }
     
@@ -266,6 +267,45 @@ const LionTechDashboard = () => {
     } catch (error) {
       console.error('Erro:', error);
       alert('Erro ao gerar cobranças');
+      setSyncing(false);
+    }
+  };
+
+  const fixDueDates = async () => {
+    if (!window.confirm('Deseja recalcular TODAS as datas de vencimento? Esta ação corrigirá cobranças com datas erradas.')) return;
+    
+    try {
+      setSyncing(true);
+      let fixedCount = 0;
+      
+      for (const payment of payments) {
+        if (payment.status === 'Cancelado') continue;
+        
+        const client = clients.find(c => c.id === payment.clientId);
+        if (!client) continue;
+        
+        const [year, month] = payment.month.split('-');
+        const dueDay = String(client.dueDay).padStart(2, '0');
+        const correctDueDate = `${year}-${month}-${dueDay}`;
+        
+        if (payment.dueDate !== correctDueDate) {
+          const currentDate = new Date();
+          const newStatus = payment.status === 'Pago' ? 'Pago' : (new Date(correctDueDate) < currentDate ? 'Atrasado' : 'Pendente');
+          
+          await updateDoc(doc(db, 'payments', payment.id), {
+            dueDate: correctDueDate,
+            status: newStatus
+          });
+          fixedCount++;
+        }
+      }
+      
+      await loadAllData();
+      setSyncing(false);
+      alert(`${fixedCount} data(s) de vencimento corrigida(s)!`);
+    } catch (error) {
+      console.error('Erro:', error);
+      alert('Erro ao corrigir datas');
       setSyncing(false);
     }
   };
@@ -555,17 +595,34 @@ const LionTechDashboard = () => {
 
   const filteredClients = useMemo(() => clients.filter(c => c.status === clientFilter), [clients, clientFilter]);
   const filteredPayments = useMemo(() => {
-    const filtered = payments.filter(p => p.month === chargeMonthFilter && p.status !== 'Cancelado');
+    // Filtrar por mês de vencimento, não por mês de geração
+    const filtered = payments.filter(p => {
+      if (p.status === 'Cancelado') return false;
+      if (!p.dueDate) return false;
+      
+      // Extrair ano-mês da data de vencimento
+      const dueDateMonth = p.dueDate.slice(0, 7); // Pega "2025-09" de "2025-09-05"
+      return dueDateMonth === chargeMonthFilter;
+    });
+    
     return filtered.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
   }, [payments, chargeMonthFilter]);
   
   const availableMonths = useMemo(() => {
-    const months = [...new Set(payments.map(p => p.month))];
+    // Obter meses únicos baseado nas datas de vencimento
+    const months = [...new Set(payments
+      .filter(p => p.dueDate && p.status !== 'Cancelado')
+      .map(p => p.dueDate.slice(0, 7)) // Extrai "2025-09" de "2025-09-05"
+    )];
     return months.length > 0 ? months.sort().reverse() : [new Date().toISOString().slice(0, 7)];
   }, [payments]);
   
   const dashboardMonthsAvailable = useMemo(() => {
-    const months = [...new Set(payments.map(p => p.month))];
+    // Obter meses únicos baseado nas datas de vencimento
+    const months = [...new Set(payments
+      .filter(p => p.dueDate && p.status !== 'Cancelado')
+      .map(p => p.dueDate.slice(0, 7))
+    )];
     return months.length > 0 ? ['TODOS', ...months.sort().reverse()] : ['TODOS', new Date().toISOString().slice(0, 7)];
   }, [payments]);
   
@@ -1075,9 +1132,13 @@ const LionTechDashboard = () => {
 
         {activeTab === 'charges' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center flex-wrap gap-2">
               <h2 className="text-2xl font-bold">Cobranças</h2>
               <div className="flex gap-2">
+                <button onClick={fixDueDates} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700">
+                  <Calendar size={18} />
+                  Corrigir Vencimentos
+                </button>
                 <select value={chargeMonthFilter} onChange={(e) => setChargeMonthFilter(e.target.value)} className="border rounded-lg px-3 py-2">
                   {availableMonths.map(month => (
                     <option key={month} value={month}>{new Date(month + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</option>
