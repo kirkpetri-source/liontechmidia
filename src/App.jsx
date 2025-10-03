@@ -188,32 +188,55 @@ const LionTechDashboard = () => {
   const downloadContract = () => { if (!showContract) return; const contractHTML = generateContract(showContract); const blob = new Blob([contractHTML], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Contrato_${showContract.name.replace(/\s+/g, '_')}.html`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); };
 
   const metrics = useMemo(() => {
-    const activeClients = clients.filter(c => c.status === 'Ativo' && !c.isPermuta).length;
+    const activeClients = clients.filter(c => c.status === 'Ativo').length;
+    const inactiveClients = clients.filter(c => c.status === 'Inativo').length;
     const activePermutaClients = clients.filter(c => c.status === 'Ativo' && c.isPermuta).length;
     const activePoints = tvPoints.filter(p => p.status === 'Ativo').length;
     
-    // Filtrar pagamentos baseado no filtro do dashboard
-    let filteredPayments = payments;
+    // Filtrar pagamentos baseado no filtro do dashboard (excluir cancelados)
+    let filteredPayments = payments.filter(p => p.status !== 'Cancelado');
     if (dashboardMonthFilter !== 'TODOS') {
-      filteredPayments = payments.filter(p => p.month === dashboardMonthFilter);
+      filteredPayments = filteredPayments.filter(p => p.month === dashboardMonthFilter);
     }
     
+    // Receita já paga (excluindo cancelados)
     const monthlyRevenue = filteredPayments.filter(p => p.status === 'Pago').reduce((sum, p) => sum + p.value, 0);
+    
+    // Receita esperada (pendente + atrasado + pago, excluindo cancelados)
     const expectedRevenue = filteredPayments.reduce((sum, p) => sum + p.value, 0);
     
-    // Calcular permuta e descontos corretamente baseado nos clientes ativos
+    // Calcular total de descontos aplicados nos pagamentos filtrados
+    const totalDiscountsGiven = filteredPayments.reduce((sum, p) => sum + (p.discountApplied || 0), 0);
+    
+    // Calcular permuta: clientes ativos de permuta
     const permutaRevenue = clients.filter(c => c.status === 'Ativo' && c.isPermuta).reduce((sum, c) => {
       return sum + calculateClientMonthly(c.selectedPoints, c.discountValue, c.permutaValue);
     }, 0);
     
-    const totalDiscountsGiven = clients.filter(c => c.status === 'Ativo').reduce((sum, c) => {
-      return sum + (c.discountValue || 0) + (c.permutaValue || 0);
-    }, 0);
+    // Multiplicar permuta pelo número de meses se "TODOS" estiver selecionado
+    let adjustedPermutaRevenue = permutaRevenue;
+    if (dashboardMonthFilter === 'TODOS') {
+      const uniqueMonths = [...new Set(payments.map(p => p.month))].length;
+      adjustedPermutaRevenue = permutaRevenue * (uniqueMonths || 1);
+    }
     
     const overdue = filteredPayments.filter(p => p.status === 'Atrasado').length;
     const overdueAmount = filteredPayments.filter(p => p.status === 'Atrasado').reduce((sum, p) => sum + p.value, 0);
     
-    return { activeClients, activePermutaClients, activePoints, totalClients: clients.length, totalPoints: tvPoints.length, monthlyRevenue, expectedRevenue, permutaRevenue, overdue, overdueAmount, totalDiscountsGiven };
+    return { 
+      activeClients, 
+      inactiveClients,
+      activePermutaClients, 
+      activePoints, 
+      totalClients: clients.length, 
+      totalPoints: tvPoints.length, 
+      monthlyRevenue, 
+      expectedRevenue, 
+      permutaRevenue: adjustedPermutaRevenue, 
+      overdue, 
+      overdueAmount, 
+      totalDiscountsGiven 
+    };
   }, [clients, tvPoints, payments, dashboardMonthFilter]);
 
   const generateMonthlyCharges = async (monthToGenerate = null) => {
@@ -831,7 +854,7 @@ const LionTechDashboard = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-6 gap-4">
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-emerald-500">
                 <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Receita Total' : 'Receita Mês'}</p>
                 <p className="text-3xl font-bold text-slate-900">R$ {metrics.monthlyRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
@@ -845,8 +868,13 @@ const LionTechDashboard = () => {
                 <p className="text-3xl font-bold text-slate-900">R$ {metrics.totalDiscountsGiven.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
               </div>
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-amber-500">
-                <p className="text-slate-600 text-sm">Clientes</p>
+                <p className="text-slate-600 text-sm">Clientes Ativos</p>
                 <p className="text-3xl font-bold text-slate-900">{metrics.activeClients}</p>
+                <p className="text-xs text-slate-500 mt-1">{metrics.activePermutaClients} permuta(s)</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-slate-500">
+                <p className="text-slate-600 text-sm">Clientes Inativos</p>
+                <p className="text-3xl font-bold text-slate-900">{metrics.inactiveClients}</p>
               </div>
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-red-500">
                 <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Atrasados Total' : 'Atrasados'}</p>
