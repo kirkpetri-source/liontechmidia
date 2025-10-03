@@ -940,8 +940,9 @@ const LionTechDashboard = () => {
                 <p className="text-3xl font-bold text-slate-900">{metrics.inactiveClients}</p>
               </div>
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-red-500">
-                <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Atrasados Total' : 'Atrasados'}</p>
-                <p className="text-3xl font-bold text-slate-900">{metrics.overdue}</p>
+                <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Valor Atrasado Total' : 'Valor Atrasado'}</p>
+                <p className="text-3xl font-bold text-slate-900">R$ {metrics.overdueAmount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                <p className="text-xs text-slate-500 mt-1">{metrics.overdue} pagamento(s)</p>
               </div>
             </div>
 
