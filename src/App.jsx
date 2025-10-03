@@ -29,6 +29,9 @@ const LionTechDashboard = () => {
   const [confirmRevert, setConfirmRevert] = useState(null);
   const [revertPassword, setRevertPassword] = useState('');
   const [selectedMonthToGenerate, setSelectedMonthToGenerate] = useState(new Date().toISOString().slice(0, 7));
+  const [dashboardMonthFilter, setDashboardMonthFilter] = useState(new Date().toISOString().slice(0, 7));
+  const [paymentToMark, setPaymentToMark] = useState(null);
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   
   const [tvPoints, setTvPoints] = useState([]);
   const [clients, setClients] = useState([]);
@@ -188,10 +191,15 @@ const LionTechDashboard = () => {
     const activeClients = clients.filter(c => c.status === 'Ativo' && !c.isPermuta).length;
     const activePermutaClients = clients.filter(c => c.status === 'Ativo' && c.isPermuta).length;
     const activePoints = tvPoints.filter(p => p.status === 'Ativo').length;
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const currentMonthPayments = payments.filter(p => p.month === currentMonth);
-    const monthlyRevenue = currentMonthPayments.filter(p => p.status === 'Pago').reduce((sum, p) => sum + p.value, 0);
-    const expectedRevenue = currentMonthPayments.reduce((sum, p) => sum + p.value, 0);
+    
+    // Filtrar pagamentos baseado no filtro do dashboard
+    let filteredPayments = payments;
+    if (dashboardMonthFilter !== 'TODOS') {
+      filteredPayments = payments.filter(p => p.month === dashboardMonthFilter);
+    }
+    
+    const monthlyRevenue = filteredPayments.filter(p => p.status === 'Pago').reduce((sum, p) => sum + p.value, 0);
+    const expectedRevenue = filteredPayments.reduce((sum, p) => sum + p.value, 0);
     
     // Calcular permuta e descontos corretamente baseado nos clientes ativos
     const permutaRevenue = clients.filter(c => c.status === 'Ativo' && c.isPermuta).reduce((sum, c) => {
@@ -202,11 +210,11 @@ const LionTechDashboard = () => {
       return sum + (c.discountValue || 0) + (c.permutaValue || 0);
     }, 0);
     
-    const overdue = currentMonthPayments.filter(p => p.status === 'Atrasado').length;
-    const overdueAmount = currentMonthPayments.filter(p => p.status === 'Atrasado').reduce((sum, p) => sum + p.value, 0);
+    const overdue = filteredPayments.filter(p => p.status === 'Atrasado').length;
+    const overdueAmount = filteredPayments.filter(p => p.status === 'Atrasado').reduce((sum, p) => sum + p.value, 0);
     
     return { activeClients, activePermutaClients, activePoints, totalClients: clients.length, totalPoints: tvPoints.length, monthlyRevenue, expectedRevenue, permutaRevenue, overdue, overdueAmount, totalDiscountsGiven };
-  }, [clients, tvPoints, payments]);
+  }, [clients, tvPoints, payments, dashboardMonthFilter]);
 
   const generateMonthlyCharges = async (monthToGenerate = null) => {
     try {
@@ -502,14 +510,22 @@ const LionTechDashboard = () => {
 
   const togglePointSelection = (pointId) => { setClientForm(prev => ({ ...prev, selectedPoints: prev.selectedPoints.includes(pointId) ? prev.selectedPoints.filter(id => id !== pointId) : [...prev.selectedPoints, pointId] })); };
   
-  const markAsPaid = async (paymentId) => {
+  const openMarkAsPaidModal = (paymentId) => {
+    setPaymentToMark(paymentId);
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+  };
+
+  const markAsPaid = async () => {
+    if (!paymentToMark) return;
     try {
       setSyncing(true);
-      await updateDoc(doc(db, 'payments', paymentId), {
+      await updateDoc(doc(db, 'payments', paymentToMark), {
         status: 'Pago',
-        paidDate: new Date().toISOString().split('T')[0]
+        paidDate: paymentDate
       });
       await loadAllData();
+      setPaymentToMark(null);
+      setPaymentDate(new Date().toISOString().split('T')[0]);
       setSyncing(false);
       alert('Marcado como pago!');
     } catch (error) {
@@ -524,6 +540,11 @@ const LionTechDashboard = () => {
   const availableMonths = useMemo(() => {
     const months = [...new Set(payments.map(p => p.month))];
     return months.length > 0 ? months.sort().reverse() : [new Date().toISOString().slice(0, 7)];
+  }, [payments]);
+  
+  const dashboardMonthsAvailable = useMemo(() => {
+    const months = [...new Set(payments.map(p => p.month))];
+    return months.length > 0 ? ['TODOS', ...months.sort().reverse()] : ['TODOS', new Date().toISOString().slice(0, 7)];
   }, [payments]);
   
   const monthsToGenerate = useMemo(() => {
@@ -659,6 +680,29 @@ const LionTechDashboard = () => {
         </div>
       )}
 
+      {paymentToMark && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-emerald-100 p-3 rounded-lg"><Check className="text-emerald-600" size={24} /></div>
+              <h3 className="text-lg font-bold">Confirmar Pagamento</h3>
+            </div>
+            <p className="text-slate-600 mb-4">Informe a data em que o pagamento foi realizado:</p>
+            <input 
+              type="date" 
+              value={paymentDate} 
+              onChange={(e) => setPaymentDate(e.target.value)} 
+              className="w-full border rounded-lg px-4 py-2 mb-4" 
+              max={new Date().toISOString().split('T')[0]}
+            />
+            <div className="flex gap-2">
+              <button onClick={markAsPaid} className="flex-1 bg-emerald-600 text-white px-4 py-2 rounded-lg font-semibold">Confirmar Pagamento</button>
+              <button onClick={() => { setPaymentToMark(null); setPaymentDate(new Date().toISOString().split('T')[0]); }} className="flex-1 bg-slate-300 px-4 py-2 rounded-lg font-semibold">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {confirmRevert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full">
@@ -769,9 +813,27 @@ const LionTechDashboard = () => {
       <div className="container mx-auto px-4 py-6">
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-md p-4">
+              <div className="flex items-center gap-3">
+                <Filter className="text-emerald-600" size={20} />
+                <label className="font-semibold text-slate-700">Filtrar Dashboard por Mês:</label>
+                <select 
+                  value={dashboardMonthFilter} 
+                  onChange={(e) => setDashboardMonthFilter(e.target.value)} 
+                  className="border-2 border-emerald-500 rounded-lg px-4 py-2 font-semibold text-emerald-700"
+                >
+                  {dashboardMonthsAvailable.map(month => (
+                    <option key={month} value={month}>
+                      {month === 'TODOS' ? 'TODOS OS MESES' : new Date(month + '-01').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-emerald-500">
-                <p className="text-slate-600 text-sm">Receita Mês</p>
+                <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Receita Total' : 'Receita Mês'}</p>
                 <p className="text-3xl font-bold text-slate-900">R$ {metrics.monthlyRevenue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
               </div>
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500">
@@ -787,7 +849,7 @@ const LionTechDashboard = () => {
                 <p className="text-3xl font-bold text-slate-900">{metrics.activeClients}</p>
               </div>
               <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-red-500">
-                <p className="text-slate-600 text-sm">Atrasados</p>
+                <p className="text-slate-600 text-sm">{dashboardMonthFilter === 'TODOS' ? 'Atrasados Total' : 'Atrasados'}</p>
                 <p className="text-3xl font-bold text-slate-900">{metrics.overdue}</p>
               </div>
             </div>
@@ -1030,7 +1092,7 @@ const LionTechDashboard = () => {
                             {payment.status !== 'Pago' && payment.status !== 'Cancelado' && (
                               <div className="flex gap-2">
                                 <button onClick={() => sendWhatsAppCharge(client.id, payment.id)} className="text-emerald-600 hover:bg-emerald-50 p-2 rounded" title="Enviar WhatsApp"><Send size={16} /></button>
-                                <button onClick={() => markAsPaid(payment.id)} className="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Marcar como pago"><Check size={16} /></button>
+                                <button onClick={() => openMarkAsPaidModal(payment.id)} className="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Marcar como pago"><Check size={16} /></button>
                                 <button onClick={() => confirmCancelPayment(payment.id)} className="text-orange-600 hover:bg-orange-50 p-2 rounded" title="Cancelar pagamento"><X size={16} /></button>
                               </div>
                             )}
